@@ -1,0 +1,29 @@
+[package]
+name = "termine"
+version = "0.1.0" # change with html_root_url in main.rs
+edition = "2021"
+authors = ["nomissbowling <nomissbowling@yahoo.co.jp>"]
+
+description = "mine for Rust with termion"
+keywords = ["mine", "stdout", "stdin", "termion", "console"]
+categories = ["development-tools", "game-development", "command-line-utilities", "command-line-interface"]
+license = "MIT"
+
+documentation = "https://docs.rs/termine/"
+homepage = "https://crates.io/crates/termine"
+repository = "https://github.com/nomissbowling/termine"
+
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+termioff = { version = "0.1" }
+
+# termion = { version = "3.0.0" } # 2.0.1
+# termion = { git = "https://github.com/redox-os/termion.git" } # 2.0.3
+termion = { version = "1.5.5" } # this patch works with termion 1.5.5
+
+[patch.crates-io]
+# termion = { git = "https://gitlab.redox-os.org/Jezza/termion.git", branch = "windows-support" } # 2018
+termion = { git = "https://github.com/nomissbowling/termion-win.git", branch = "windows-support" }
