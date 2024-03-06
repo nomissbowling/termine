@@ -1,6 +1,6 @@
 [package]
 name = "termine"
-version = "0.1.0" # change with html_root_url in main.rs
+version = "0.1.1" # change with html_root_url in main.rs
 edition = "2021"
 authors = ["nomissbowling <nomissbowling@yahoo.co.jp>"]
 
