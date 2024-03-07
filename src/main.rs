@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/termine/0.1.2")]
+#![doc(html_root_url = "https://docs.rs/termine/1.0.0")]
 //! termine mine for Rust with termion
 //!
 
@@ -64,7 +64,7 @@ impl Termine {
 
   /// c
   /// upper 4bit
-  /// - 7 skip
+  /// - 7 1: force open at ending, 0: normal
   /// - 6 1: flag, 0: as is
   /// - 5 1: question, 0: as is
   /// - 4 1: open, 0: close
@@ -81,7 +81,10 @@ impl Termine {
       if self.is_explosion() && Self::is_mine(v) { f[1] } // may be always mine
       else { if self.is_blink() { f[15] } else { n } } // blink or through
     };
-    Ok((String::from_utf8(vec![o as u8])?, Rgb(32, 32, 32), Rgb(240, 192, 32)))
+    let (bgc, fgc) = if Self::is_e(u) { (Rgb(240, 32, 96), Rgb(240, 192, 32)) }
+      else if Self::is_o(u) { (Rgb(32, 96, 240), Rgb(240, 192, 32)) }
+      else { (Rgb(96, 240, 32), Rgb(32, 96, 240)) };
+    Ok((String::from_utf8(vec![o as u8])?, bgc, fgc))
   }
 
   /// is_blink
@@ -113,10 +116,12 @@ impl Termine {
     Key::Char(' ') => {
       if self.s == 0 { self.start(); } // at the first time
       if !self.is_opened(self.r, self.c) {
-        if self.open(self.r, self.c) { self.s += 1; }
-        else { self.explosion(); }
+        if !self.open(self.r, self.c) { self.explosion(); }
+        else {
+          self.s += 1;
+          if self.s + self.m == self.w*self.h { self.success(); } // not '>='
+        }
       }
-      if self.s == self.w * self.h - self.m { self.success(); }
     },
     _ => { f = false; }
     }
@@ -125,51 +130,52 @@ impl Termine {
 
   /// is_opened
   pub fn is_opened(&self, r: u16, c: u16) -> bool {
-    self.f[r as usize][c as usize] & 0x10 != 0
+    Self::is_o(self.f[r as usize][c as usize])
   }
 
   /// open
   pub fn open(&mut self, r: u16, c: u16) -> bool {
     let n = &mut self.f[r as usize][c as usize];
     if Self::is_mine(Self::get_v(*n)) { return false; } // explosion
-    Self::set_o(n);
+    Self::set_o(n, false);
     true
   }
 
   /// is_explosion
-  pub fn is_explosion(&self) -> bool { self.s == 0xffff }
+  pub fn is_explosion(&self) -> bool { self.s & 0x8000 != 0 }
 
   /// explosion
-  pub fn explosion(&mut self) -> () { self.s = 0xffff; }
+  pub fn explosion(&mut self) -> () { self.s |= 0x8000; }
 
   /// is_success
-  pub fn is_success(&self) -> bool { self.s == 0xfffe }
+  pub fn is_success(&self) -> bool { self.s & 0x4000 != 0 }
 
   /// success
-  pub fn success(&mut self) -> () { self.s = 0xfffe; }
+  pub fn success(&mut self) -> () { self.s |= 0x4000; }
 
   /// is_end
-  pub fn is_end(&self) -> bool { self.s >= 0x8000 }
+  pub fn is_end(&self) -> bool { self.s >= 0x4000 }
 
   /// ending
   pub fn ending(&mut self, tm: &mut Termioff) -> Result<(), Box<dyn Error>> {
-    for v in &mut self.f { for u in v { Self::set_o(u); } } // all open
+    for v in &mut self.f { for u in v { Self::set_o(u, true); } } // all open
     self.refresh(tm)?;
     Ok(())
   }
 
   /// start
   pub fn start(&mut self) -> () {
+    let e = self.m >= self.w*self.h; // fill all when mine full
     let mut p: Vec<u16> = (0..self.w*self.h).into_iter().collect();
     p.shuffle(&mut rand::thread_rng());
     let mut n = 0;
     for i in 0..=self.m as usize {
+      if n >= self.m || i >= p.len() { break; }
       let r = p[i] / self.w;
       let c = p[i] % self.w;
-      if r != self.r || c != self.c {
-        self.f[r as usize][c as usize] = 0x0f;
+      if e || r != self.r || c != self.c { // fill all when mine full
+        Self::set_m(&mut self.f[r as usize][c as usize]);
         n += 1;
-        if n == self.m { break; }
       }
     }
     let f = self.f.clone();
@@ -198,14 +204,29 @@ impl Termine {
     n
   }
 
-  /// set o
-  pub fn set_o(u: &mut u8) -> () { *u |= 0x10; }
+  /// set e
+  pub fn set_e(u: &mut u8) -> () { *u |= 0x80; }
 
-  /// get v
-  pub fn get_v(u: u8) -> u8 { u & 0x0f }
+  /// is_e
+  pub fn is_e(u: u8) -> bool { u & 0x80 != 0 }
+
+  /// set o
+  pub fn set_o(u: &mut u8, e: bool) -> () {
+    if e && !Self::is_o(*u) { Self::set_e(u); } // force open at ending
+    *u |= 0x10;
+  }
+
+  /// is_o
+  pub fn is_o(u: u8) -> bool { u & 0x10 != 0 }
+
+  /// set m
+  pub fn set_m(u: &mut u8) -> () { *u = 0x0f; }
 
   /// is_mine
   pub fn is_mine(u: u8) -> bool { u == 0x0f }
+
+  /// get v
+  pub fn get_v(u: u8) -> u8 { u & 0x0f }
 }
 
 /// msg
@@ -216,7 +237,8 @@ pub fn msg(x: u16, y: u16, t: time::Instant) -> String {
 /// show status
 pub fn show_status(tm: &mut Termioff, m: &Termine, t: time::Instant) ->
   Result<(), Box<dyn Error>> {
-  tm.wr(1, tm.h - 2, 1, Rgb(192, 192, 192), Rgb(8, 8, 8), &msg(m.m, m.s, t))?;
+  tm.wr(1, tm.h - 2, 1, Rgb(192, 192, 192), Rgb(8, 8, 8),
+    &msg(m.m, m.s & 0x3fff, t))?;
   Ok(())
 }
 
@@ -228,7 +250,10 @@ pub fn main() -> Result<(), Box<dyn Error>> {
   let t = time::Instant::now();
   tm.wr(1, tm.h, 3, color::Magenta, Rgb(240, 192, 32), &msg(tm.w, tm.h, t))?;
 
-  let mut m = Termine::new(16, 8, 12);
+  // let mut m = Termine::new(2, 2, 2);
+  let mut m = Termine::new(5, 4, 3);
+  // let mut m = Termine::new(16, 8, 12);
+  // let mut m = Termine::new(80, 50, 12);
   m.reset_t(&mut tm)?;
 
   let (_tx, rx) = tm.prepare_thread()?;
@@ -266,7 +291,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
   // handle.join()?;
 
-  // show_status(&mut tm, &m, t)?;
+  show_status(&mut tm, &m, t)?;
   tm.wr(1, tm.h - 1, 3, Rgb(255, 0, 0), Rgb(255, 255, 0), &msg(tm.w, tm.h, t))?;
   tm.fin()?;
   Ok(())
