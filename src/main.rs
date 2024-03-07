@@ -1,10 +1,13 @@
-#![doc(html_root_url = "https://docs.rs/termine/0.1.1")]
+#![doc(html_root_url = "https://docs.rs/termine/0.1.2")]
 //! termine mine for Rust with termion
 //!
 
 use std::error::Error;
 use std::time;
 use std::sync::mpsc;
+
+use rand;
+use rand::prelude::SliceRandom;
 
 use termion::event::{Event, Key, MouseEvent};
 use termion::{color, color::Rgb};
@@ -13,6 +16,8 @@ use termioff::Termioff;
 
 /// Termine
 pub struct Termine {
+  /// status
+  pub s: u16,
   /// area width
   pub w: u16,
   /// area height
@@ -38,17 +43,20 @@ impl Termine {
   /// constructor
   pub fn new(w: u16, h: u16, m: u16) -> Self {
     let f = (0..h).into_iter().map(|_r|
-      (0..w).into_iter().map(|_c| 0).collect()).collect();
-    Termine{w, h, m, f, r: 0, c: 0,
+      (0..w).into_iter().map(|_c|
+        0).collect()).collect(); // all close
+    Termine{s: 0, w, h, m, f, r: 0, c: 0,
       ms: time::Duration::from_millis(10), b: 80, t: 0}
   }
 
   /// refresh
   pub fn refresh(&self, tm: &mut Termioff) -> Result<(), Box<dyn Error>> {
-    for (r, v) in (&self.f).iter().enumerate() {
-      for (c, _u) in v.iter().enumerate() {
-        let cbf = self.c(r as u16, c as u16)?;
-        tm.wr(5 + c as u16, 5 + r as u16, 3, cbf.1, cbf.2, &cbf.0)?;
+    for (r, v) in self.f.iter().enumerate() {
+      for (c, u) in v.iter().enumerate() {
+        let ur = r as u16;
+        let uc = c as u16;
+        let (s, bgc, fgc) = self.c(ur, uc, *u)?;
+        tm.wr(1 + uc, 1 + ur, 3, bgc, fgc, &s)?;
       }
     }
     Ok(())
@@ -62,15 +70,22 @@ impl Termine {
   /// - 4 1: open, 0: close
   /// lower 4bit
   /// - 0-3 0: '_', 1-8: num, 9-14: skip, 15: '@' mine
-  pub fn c(&self, r: u16, c: u16) ->
+  pub fn c(&self, r: u16, c: u16, u: u8) ->
     Result<(String, Rgb, Rgb), Box<dyn Error>> {
-    let f = "LO??PPPP++++++++".chars().collect::<Vec<_>>(); // 4 bit upper
+    let f = "L*??PPPP++++++++".chars().collect::<Vec<_>>(); // 4 bit upper
     let s = "_12345678......@".chars().collect::<Vec<_>>(); // 4 bit lower
+    let v = Self::get_v(u);
+    let n = if self.is_opened(r, c) { s[v as usize] } else { f[0] };
     let curs = r == self.r && c == self.c;
-    let n = if curs { s[0] } else { f[0] };
-    let o = if self.t < self.b / 2 && curs { f[15] } else { n };
+    let o = if !curs || self.is_success() { n } else { // through
+      if self.is_explosion() && Self::is_mine(v) { f[1] } // may be always mine
+      else { if self.is_blink() { f[15] } else { n } } // blink or through
+    };
     Ok((String::from_utf8(vec![o as u8])?, Rgb(32, 32, 32), Rgb(240, 192, 32)))
   }
+
+  /// is_blink
+  pub fn is_blink(&self) -> bool { self.t < self.b / 2 }
 
   /// tick and control blink cursor
   pub fn tick(&mut self, tm: &mut Termioff) -> Result<(), Box<dyn Error>> {
@@ -88,22 +103,121 @@ impl Termine {
   }
 
   /// update
-  pub fn update(&mut self, k: Key) -> Result<bool, Box<dyn Error>> {
+  pub fn update(&mut self, k: Key) -> bool {
     let mut f = true;
     match k {
     Key::Left | Key::Char('h') => { if self.c > 0 { self.c -= 1; } },
     Key::Down | Key::Char('j') => { if self.r < self.h - 1 { self.r += 1; } },
     Key::Up | Key::Char('k') => { if self.r > 0 { self.r -= 1; } },
     Key::Right | Key::Char('l') => { if self.c < self.w - 1 { self.c += 1; } },
+    Key::Char(' ') => {
+      if self.s == 0 { self.start(); } // at the first time
+      if !self.is_opened(self.r, self.c) {
+        if self.open(self.r, self.c) { self.s += 1; }
+        else { self.explosion(); }
+      }
+      if self.s == self.w * self.h - self.m { self.success(); }
+    },
     _ => { f = false; }
     }
-    Ok(f)
+    f
   }
+
+  /// is_opened
+  pub fn is_opened(&self, r: u16, c: u16) -> bool {
+    self.f[r as usize][c as usize] & 0x10 != 0
+  }
+
+  /// open
+  pub fn open(&mut self, r: u16, c: u16) -> bool {
+    let n = &mut self.f[r as usize][c as usize];
+    if Self::is_mine(Self::get_v(*n)) { return false; } // explosion
+    Self::set_o(n);
+    true
+  }
+
+  /// is_explosion
+  pub fn is_explosion(&self) -> bool { self.s == 0xffff }
+
+  /// explosion
+  pub fn explosion(&mut self) -> () { self.s = 0xffff; }
+
+  /// is_success
+  pub fn is_success(&self) -> bool { self.s == 0xfffe }
+
+  /// success
+  pub fn success(&mut self) -> () { self.s = 0xfffe; }
+
+  /// is_end
+  pub fn is_end(&self) -> bool { self.s >= 0x8000 }
+
+  /// ending
+  pub fn ending(&mut self, tm: &mut Termioff) -> Result<(), Box<dyn Error>> {
+    for v in &mut self.f { for u in v { Self::set_o(u); } } // all open
+    self.refresh(tm)?;
+    Ok(())
+  }
+
+  /// start
+  pub fn start(&mut self) -> () {
+    let mut p: Vec<u16> = (0..self.w*self.h).into_iter().collect();
+    p.shuffle(&mut rand::thread_rng());
+    let mut n = 0;
+    for i in 0..=self.m as usize {
+      let r = p[i] / self.w;
+      let c = p[i] % self.w;
+      if r != self.r || c != self.c {
+        self.f[r as usize][c as usize] = 0x0f;
+        n += 1;
+        if n == self.m { break; }
+      }
+    }
+    let f = self.f.clone();
+    for (r, v) in self.f.iter_mut().enumerate() {
+      for (c, u) in v.iter_mut().enumerate() {
+        if Self::is_mine(f[r][c]) { continue; }
+        *u = Self::get_k(self.w, self.h, &f, r as u16, c as u16);
+      }
+    }
+    ()
+  }
+
+  /// get_k
+  pub fn get_k(w: u16, h: u16, f: &Vec<Vec<u8>>, r: u16, c: u16) -> u8 {
+    let mut n = 0u8;
+    let rs = if r > 0 { r - 1 } else { r };
+    let re = if r < h - 1 { r + 1 } else { r };
+    let cs = if c > 0 { c - 1 } else { c };
+    let ce = if c < w - 1 { c + 1 } else { c };
+    for j in rs..=re {
+      for i in cs..=ce {
+        if j == r && i == c { continue; }
+        if Self::is_mine(f[j as usize][i as usize]) { n += 1; }
+      }
+    }
+    n
+  }
+
+  /// set o
+  pub fn set_o(u: &mut u8) -> () { *u |= 0x10; }
+
+  /// get v
+  pub fn get_v(u: u8) -> u8 { u & 0x0f }
+
+  /// is_mine
+  pub fn is_mine(u: u8) -> bool { u == 0x0f }
 }
 
 /// msg
 pub fn msg(x: u16, y: u16, t: time::Instant) -> String {
-  format!("[({}, {}) {:?}]", x, y, t.elapsed())
+  format!("({}, {}) {:?}", x, y, t.elapsed())
+}
+
+/// show status
+pub fn show_status(tm: &mut Termioff, m: &Termine, t: time::Instant) ->
+  Result<(), Box<dyn Error>> {
+  tm.wr(1, tm.h - 2, 1, Rgb(192, 192, 192), Rgb(8, 8, 8), &msg(m.m, m.s, t))?;
+  Ok(())
 }
 
 /// main
@@ -112,9 +226,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
   tm.begin()?;
 
   let t = time::Instant::now();
-  tm.wr(1, 1, 3, color::Magenta, Rgb(240, 192, 32), &msg(tm.w, tm.h, t))?;
+  tm.wr(1, tm.h, 3, color::Magenta, Rgb(240, 192, 32), &msg(tm.w, tm.h, t))?;
 
-  let mut m = Termine::new(8, 8, 5);
+  let mut m = Termine::new(16, 8, 12);
   m.reset_t(&mut tm)?;
 
   let (_tx, rx) = tm.prepare_thread()?;
@@ -123,7 +237,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     match rx.recv_timeout(m.ms) {
     Err(mpsc::RecvTimeoutError::Disconnected) => break, // not be arrived here
     Err(mpsc::RecvTimeoutError::Timeout) => { // idle
-      tm.wr(40, 10, 1, Rgb(192, 192, 192), Rgb(8, 8, 8), &msg(m.b, m.t, t))?;
+      show_status(&mut tm, &m, t)?;
       m.tick(&mut tm)?;
     },
     Ok(ev) => {
@@ -132,8 +246,9 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         match k {
         Key::Ctrl('c') | Key::Char('q') => break,
         Key::Esc | Key::Char('\x1b') => break,
-        _ => { if m.update(k)? { m.reset_t(&mut tm)?; } }
+        _ => { if m.update(k) { m.reset_t(&mut tm)?; } }
         }
+        if m.is_end() { m.ending(&mut tm)?; break; }
       },
       Ok(Event::Mouse(m)) => {
         match m {
@@ -151,6 +266,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
 
   // handle.join()?;
 
+  // show_status(&mut tm, &m, t)?;
   tm.wr(1, tm.h - 1, 3, Rgb(255, 0, 0), Rgb(255, 255, 0), &msg(tm.w, tm.h, t))?;
   tm.fin()?;
   Ok(())
