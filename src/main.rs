@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/termine/1.0.0")]
+#![doc(html_root_url = "https://docs.rs/termine/1.1.0")]
 //! termine mine for Rust with termion
 //!
 
@@ -118,7 +118,6 @@ impl Termine {
       if !self.is_opened(self.r, self.c) {
         if !self.open(self.r, self.c) { self.explosion(); }
         else {
-          self.s += 1;
           if self.s + self.m == self.w*self.h { self.success(); } // not '>='
         }
       }
@@ -136,8 +135,22 @@ impl Termine {
   /// open
   pub fn open(&mut self, r: u16, c: u16) -> bool {
     let n = &mut self.f[r as usize][c as usize];
-    if Self::is_mine(Self::get_v(*n)) { return false; } // explosion
+    let v = Self::get_v(*n);
+    if Self::is_mine(v) { return false; } // explosion
     Self::set_o(n, false);
+    self.s += 1;
+    if v == 0 {
+      let rs = if r > 0 { r - 1 } else { r };
+      let re = if r < self.h - 1 { r + 1 } else { r };
+      let cs = if c > 0 { c - 1 } else { c };
+      let ce = if c < self.w - 1 { c + 1 } else { c };
+      for j in rs..=re {
+        for i in cs..=ce {
+          if j == r && i == c { continue; }
+          if !self.is_opened(j, i) { self.open(j, i); } // always success
+        }
+      }
+    }
     true
   }
 
@@ -250,9 +263,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
   let t = time::Instant::now();
   tm.wr(1, tm.h, 3, color::Magenta, Rgb(240, 192, 32), &msg(tm.w, tm.h, t))?;
 
+  // let mut m = Termine::new(1, 1, 0);
+  // let mut m = Termine::new(1, 1, 1);
+  // let mut m = Termine::new(2, 2, 0);
   // let mut m = Termine::new(2, 2, 2);
-  let mut m = Termine::new(5, 4, 3);
-  // let mut m = Termine::new(16, 8, 12);
+  // let mut m = Termine::new(5, 4, 3);
+  // let mut m = Termine::new(8, 8, 5);
+  let mut m = Termine::new(16, 8, 12);
   // let mut m = Termine::new(80, 50, 12);
   m.reset_t(&mut tm)?;
 
