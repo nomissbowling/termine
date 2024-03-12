@@ -1,6 +1,6 @@
 [package]
 name = "termine"
-version = "1.1.0" # change with html_root_url in main.rs
+version = "3.0.0" # change with html_root_url in main.rs
 edition = "2021"
 authors = ["nomissbowling <nomissbowling@yahoo.co.jp>"]
 
@@ -20,6 +20,7 @@ readme = "README.md"
 [dependencies]
 rand = { version = "0.8.5" }
 
+minefield = { version = "0.1" }
 termioff = { version = "0.1" }
 
 # termion = { version = "3.0.0" } # 2.0.1
