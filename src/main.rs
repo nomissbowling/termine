@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/termine/3.1.0")]
+#![doc(html_root_url = "https://docs.rs/termine/3.2.0")]
 //! termine mine for Rust with termion
 //!
 
@@ -13,7 +13,7 @@ use termioff::Termioff;
 
 use minefield::MineField;
 
-use mvc_rs::View as MVCView;
+use mvc_rs::{TPacket, TView};
 
 /// Term
 pub struct Term<T> {
@@ -23,11 +23,13 @@ pub struct Term<T> {
   pub tm: Termioff
 }
 
-/// trait MVCView for Term
-impl<T: color::Color + Clone> MVCView<T> for Term<T> {
+/// trait TView for Term
+impl<T: color::Color + Clone> TView<T> for Term<T> {
   /// wr
-  fn wr(&mut self, x: u16, y: u16, st: u16,
-    bgc: u16, fgc: u16, msg: &String) -> Result<(), Box<dyn Error>> {
+  fn wr(&mut self, p: impl TPacket) -> Result<(), Box<dyn Error>> {
+    let v = p.to_vec();
+    let (x, y, st, bgc, fgc) = (v[0], v[1], v[2], v[3], v[4]);
+    let msg = &p.as_str().to_string();
     self.tm.wr(x + 1, y + 1, st, self.col(bgc), self.col(fgc), msg)?;
     Ok(())
   }
