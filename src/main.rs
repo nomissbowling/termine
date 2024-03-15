@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/termine/3.2.0")]
+#![doc(html_root_url = "https://docs.rs/termine/3.3.0")]
 //! termine mine for Rust with termion
 //!
 
